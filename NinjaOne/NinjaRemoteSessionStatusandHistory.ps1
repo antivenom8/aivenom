@@ -151,7 +151,6 @@ if (($CheckHTML | ConvertFrom-Json).html) {
     foreach ($Row in $TRows) {
         $Value = $Row.td
         if ([string]::IsNullorWhiteSpace($Value)) { 
-            Write-Host 'No Value'
             continue 
         }
         $RowObject = [PSCustomObject]@{}
