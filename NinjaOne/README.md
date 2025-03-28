@@ -7,3 +7,6 @@ If you are looking for this script, it has been moved. Please visit https://ninj
 
 ## 2. Ninja Remote Session Status & History
 Script to collect session status. Column can be added to device grid to quickly see active sessions. Also a WYSIWYG field to track session history.
+
+## 3. Custom Reboot Day & Time
+Script that allows a felxible reboot day and time schedule as defined in a custom field.
