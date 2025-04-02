@@ -11,5 +11,5 @@ Script to collect session status. Column can be added to device grid to quickly 
 ## 3. Custom Reboot Day & Time
 Script that allows a felxible reboot day and time schedule as defined in a custom field.
 
-## 4. Custom Reboot Day & Time
+## 4. Vulnerability Import & Log
 This script is used to import a vulnerability csv file exported from various vulnerability scan tools/platforms.
