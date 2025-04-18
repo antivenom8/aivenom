@@ -148,7 +148,8 @@ try {
     $NRPIDConfirmation = ($LastNRPID).Name.Substring(6)
 }
 catch {
-    Write-Host 'Unable to determine the last session PID. Exiting.'
+    Write-Host 'Unable to determine previous NR Session PID. Exiting.'
+    Write-Host "$($_.Exception.Message)"
     exit 0
 }
 
