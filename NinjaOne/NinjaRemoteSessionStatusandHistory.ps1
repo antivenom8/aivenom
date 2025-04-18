@@ -37,9 +37,7 @@
     custom fields updated.
 
     By default saves the most recent 30 session events. This can be adjusted by changing $SessionsToKeep.
-
 #>
-
 
 #### Functions ####
 function ConvertTo-HTMLTable {
