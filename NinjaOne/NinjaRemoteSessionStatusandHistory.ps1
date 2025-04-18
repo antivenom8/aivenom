@@ -11,10 +11,11 @@
     # Date: 12/14/2024
     # Description: Gets Ninja Remote Session status to custom fields.
     # Updated: 1/17/2025 - Added Session History Collection
+    # Updated: 4/18/2025 - Removed reliance on Agent Log. Added Tag option.
     # ---------------------------------------------------------------
 
 .NOTES
-    Custom Fields Required:
+    REQUIRED: Custom Fields
     Name: NinjaRemoteSessionStart
     Type: Text
     Name: NinjaRemoteSessionEnd
@@ -24,7 +25,12 @@
     Name: NinjaRemoteSessionHistory
     Type: WYSIWYG
 
-   The Session Start/End and Session Active can be added to the Device Grid to keep an eye on currently active sessions. 
+    OPTIONAL: Tags
+    Make sure you've created a tag with your desired name.
+    At the start of the script, after the fuctions, change $SetTag = '' to $SetTag = 'YourTagName', and script will
+    set the device with the tag name you entered. It will remove it upon session end.
+
+    The Session Start/End and Session Active can be added to the Device Grid to keep an eye on currently active sessions. 
 
     Designed to be ran as a Script Result Condition, the more frequent, the greater accuracy the script will have for active sessions. Recommended 1-5 minute intervals. 
     Exits 0, even if issues are found where it cannot collect the necessary info, this is to prevent alerts. This will simply run at the alloted frequency and keep the 
@@ -87,7 +93,7 @@ function ConvertTo-HTMLTable {
 
 $SessionsToKeep = 30
 $NRLogsLocation = "$env:systemroot\temp"
-$NinjaAgentLogs = "$env:ProgramData\NinjaRMMAgent\logs"
+$SetTag = ''
 
 $NRProcess = Get-Process | Where-Object { $_.Name -eq 'NCStreamer' }
 
@@ -101,13 +107,28 @@ if ($NRProcess.Count -gt 1) {
     $NRStartTime = $NRDetails.StartTime
 
     if (!($NRStartTime)) {
-        $NRStartTime = (Get-ChildItem "$($NRLogsLocation)" | Where-Object { $_.Name -match "ncstreamer$($NRDetails.ProcessID)" }).CreationTime
-        
+        $NRStartTime = (Get-ChildItem "$($NRLogsLocation)" | 
+            Where-Object { $_.Name -match "ncstreamer$($NRDetails.ProcessID)" }).CreationTime
+    }
+
+    try {
+        New-Item "$NRLogsLocation\NRPID_$($NRDetails.ProcessID)" -Force -ErrorAction Stop
+    }
+    catch {
+        Write-Host 'Unable to record the NR Remote Process ID for use in collecting the session end time. Exiting.'
+        Write-Host "$($_.Exception.Message)"
+        exit 0
     }
 
     Ninja-Property-Set NinjaRemoteSessionStart ($NRStartTime.ToString("yyyy-MM-dd HH:mm"))
     Ninja-Property-Set NinjaRemoteSessionActive 1
     Ninja-Property-Set NinjaRemoteSessionEnd ''
+
+    if (!([string]::IsNullOrWhiteSpace($SetTag))) {
+        Write-Host 'Setting NinjaTag'
+        Set-NinjaTag "$SetTag"
+    }
+
     exit 0
 }
 
@@ -119,16 +140,21 @@ if (!([string]::IsNullOrWhiteSpace($CheckifEndTimeExists)) -or ([string]::IsNull
     exit 0
 }
 
-$LastNRLog = Get-ChildItem $NRLogsLocation | Where-Object { ($_.Name -match 'ncstreamer') -and ($_.Name -notmatch 'ncstreamer_') } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$LastNRLog = Get-ChildItem $NRLogsLocation | 
+Where-Object { ($_.Name -match 'ncstreamer') -and ($_.Name -notmatch 'ncstreamer_') } | 
+Sort-Object LastWriteTime -Descending | Select-Object -First 1
 
-$NinjaLogContent = Get-Content (Get-ChildItem $NinjaAgentLogs | Where-Object { $_.Name -match 'NinjaRMMAgent_' } | 
-    Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
+$LastNRPID = Get-ChildItem $NRLogsLocation | Where-Object { $_.Name -match 'NRPID_' } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 
-$NRLogConfirmation = $NinjaLogContent | Select-String 'NJCTRL:' | Where-Object { ($_ -match 'UserProcessStarted') } | Select-Object -Last 1
+try {
+    $NRPIDConfirmation = ($LastNRPID).Name.Substring(6)
+}
+catch {
+    Write-Host 'Unable to determine the last session PID. Exiting.'
+    exit 0
+}
 
-$NRLogPID = (($NRLogConfirmation | Select-String 'NJCTRL:' | Where-Object { $_ -match 'UserProcessStarted' } | Select-Object -Last 1).Line -split ' ')[-1]
-
-if (!($LastNRLog -match $NRLogPID)) {
+if (!($LastNRLog -match $NRPIDConfirmation)) {
     Write-Host 'Unable to match last NR log process to Agent log process'
     exit 0
 }
@@ -178,13 +204,19 @@ if (($CheckHTML | ConvertFrom-Json).html) {
     $HTML | Ninja-Property-Set-Piped NinjaRemoteSessionHistory
     Ninja-Property-Set NinjaRemoteSessionEnd $NRSessionEndTime
     Ninja-Property-Set NinjaRemoteSessionActive 0
-    exit 0
-
 }
 else {
     $HTML = ConvertTo-HTMLTable $CompleteRecord
     $HTML | Ninja-Property-Set-Piped NinjaRemoteSessionHistory
     Ninja-Property-Set NinjaRemoteSessionEnd $NRSessionEndTime
     Ninja-Property-Set NinjaRemoteSessionActive 0
-    exit 0
 }
+
+if (!([string]::IsNullOrWhiteSpace($SetTag))) {
+    Write-Host 'Removing NinjaTag'
+    Remove-NinjaTag "$SetTag"
+}
+
+Remove-Item $LastNRPID.FullName -Force
+
+exit 0
