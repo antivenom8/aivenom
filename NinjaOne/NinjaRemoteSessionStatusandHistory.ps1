@@ -148,13 +148,13 @@ try {
     $NRPIDConfirmation = ($LastNRPID).Name.Substring(6)
 }
 catch {
-    Write-Host 'Unable to determine previous NR Session PID. Exiting.'
+    Write-Host 'Unable to determine previous NR Session process ID. Exiting.'
     Write-Host "$($_.Exception.Message)"
     exit 0
 }
 
 if (!($LastNRLog -match $NRPIDConfirmation)) {
-    Write-Host 'Unable to match last NR log process to Agent log process'
+    Write-Host 'Unable to match last NR session process ID. Exiting.'
     exit 0
 }
 
