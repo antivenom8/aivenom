@@ -12,6 +12,7 @@
     # Description: Gets Ninja Remote Session status to custom fields.
     # Updated: 1/17/2025 - Added Session History Collection
     # Updated: 4/18/2025 - Removed reliance on Agent Log. Added Tag option.
+    # Updated: 6/2/2025 - Reworked script logic. Added Session Type Column.
     # ---------------------------------------------------------------
 
 .NOTES
@@ -27,7 +28,7 @@
 
     OPTIONAL: Tags
     Make sure you've created a tag with your desired name.
-    At the start of the script, after the fuctions, change $SetTag = '' to $SetTag = 'YourTagName', and script will
+    At the start of the script, after the fuctions, is $SetTag = $env:setTag. If you add a script variable in Ninja called setTag, this will
     set the device with the tag name you entered. It will remove it upon session end.
 
     The Session Start/End and Session Active can be added to the Device Grid to keep an eye on currently active sessions. 
@@ -87,62 +88,175 @@ function ConvertTo-HTMLTable {
     return $FinalHTML
 }
 
+function Update-NRSessionHistory {
+    param (
+        [Parameter(Mandatory = $true)]
+        [PSCustomObject[]]$UpdateAllSessions
+    )
+
+    $CheckHTML = Ninja-Property-Get NinjaRemoteSessionHistory
+    Start-Sleep 5
+    if (($CheckHTML | ConvertFrom-Json).html) {
+        [xml]$HTMLtoXML = ($CheckHTML | ConvertFrom-Json).html
+        $THeaders = $HTMLtoXML.SelectNodes("//thead/tr/th") | ForEach-Object { $_.InnerText }
+        $TRows = $HTMLtoXML.SelectNodes("//tbody/tr")
+        $HTMLtoObject = [System.Collections.Generic.List[object]]::New()
+        foreach ($Row in $TRows) {
+            $Value = $Row.td
+            if ([string]::IsNullOrWhiteSpace($Value)) { 
+                continue 
+            }
+            $RowObject = [PSCustomObject]@{}
+            for ($i = 0; $i -lt $THeaders.Count; $i++) {
+                $RowObject | Add-Member -MemberType NoteProperty -Name $THeaders[$i] -Value $Value[$i]
+            }
+            $HTMLtoObject.Add($RowObject)
+        }
+
+        ## This takes the previous versions data without the session type column and adjusts for it
+        if (($HTMLtoObject[0] | Get-Member -MemberType NoteProperty).Count -eq 3) {
+            $TempObject = [System.Collections.Generic.List[object]]::New()
+            foreach ($Record in $HTMLtoObject) {
+                $TempRecord = [PSCustomObject]@{
+                    'Session Start'    = $Record.'Session Start'
+                    'Session End'      = $Record.'Session End'
+                    'Session Type'     = ''
+                    'Session Duration' = $Record.'Session Duration'
+                }
+                
+                $TempObject.Add($TempRecord)
+            }
+            $HTMLtoObject = $TempObject
+        }
+
+        foreach ($NewSession in $UpdateAllSessions) {
+            $HTMLtoObject.Add($NewSession)
+        } 
+
+        $HTMLtoObject = $HTMLtoObject | Sort-Object 'Session Start' -Descending
+
+        if ($HTMLtoObject.Count -gt $SessionsToKeep) {
+            $HTMLtoObject = $HTMLToObject[0..($HTMLToObject.Count - ($SessionsToKeep + 1))]
+        }
+
+        ## WYSIWYG fields have a limit of 200k characters. This will remove the oldest entry
+        ## if character length is 190k or more, ensuring enough space for the most recent entry.
+        if ($CheckHTML.Length -ge 190000) {
+            Write-Host 'Removing oldest entry due to character limit...'
+            $HTMLtoObject = $HTMLToObject[0..($HTMLToObject.Count - 2)]
+        }
+
+        $HTML = ConvertTo-HTMLTable $HTMLtoObject
+        $HTML | Ninja-Property-Set-Piped NinjaRemoteSessionHistory
+    }
+    else {
+        $HTML = ConvertTo-HTMLTable $UpdateAllSessions
+        $HTML | Ninja-Property-Set-Piped NinjaRemoteSessionHistory
+    }
+}
+
 #### End Functions ####
 
 $SessionsToKeep = 30
 $NRLogsLocation = "$env:systemroot\temp"
-$SetTag = ''
+$SetTag = $env:setTag
 
-$NRProcess = Get-Process | Where-Object { $_.Name -eq 'NCStreamer' }
+$NRPIDFiles = Get-ChildItem $NRLogsLocation | Where-Object { $_.Name -match 'NRPID_' } | Sort-Object LastWriteTime
+$CheckifStartTimeExists = Ninja-Property-Get NinjaRemoteSessionStart
+Start-Sleep 3
+$CheckifEndTimeExists = Ninja-Property-Get NinjaRemoteSessionEnd
+Start-Sleep 3
 
-if ($NRProcess.Count -gt 1) {
+$NRProcess = Get-CimInstance Win32_Process | Where-Object { $_.Name -eq "ncstreamer.exe" } | 
+Select-Object Name, ProcessID, SessionId, @{Name = "StartTime"; Expression = { ($_.CreationDate -as [datetime]).ToLocalTime() } } | 
+Sort-Object StartTime
 
-    $NRDetails = Get-CimInstance Win32_Process | Where-Object { $_.Name -eq "ncstreamer.exe" } | 
-    Sort-Object -Descending | 
-    Select-Object Name, ProcessID, @{Name = "StartTime"; Expression = { ($_.CreationDate -as [datetime]).ToLocalTime() } } | 
-    Sort-Object StartTime -Descending | Select-Object -First 1
 
+if (($NRProcess | Measure-Object).Count -gt 1) {
+    $NRDetails = $NRProcess[($NRProcess | Measure-Object).Count - (($NRProcess | Measure-Object).Count - 1) ] 
     $NRStartTime = $NRDetails.StartTime
-
     if (!($NRStartTime)) {
         $NRStartTime = (Get-ChildItem "$($NRLogsLocation)" | 
             Where-Object { $_.Name -match "ncstreamer$($NRDetails.ProcessID)" }).CreationTime
     }
 
-    try {
-        New-Item "$NRLogsLocation\NRPID_$($NRDetails.ProcessID)" -Force -ErrorAction Stop
-    }
-    catch {
-        Write-Host 'Unable to record the NR Remote Process ID for use in collecting the session end time. Exiting.'
-        Write-Host "$($_.Exception.Message)"
-        exit 0
-    }
-
-    Ninja-Property-Set NinjaRemoteSessionStart ($NRStartTime.ToString("yyyy-MM-dd HH:mm"))
-    Ninja-Property-Set NinjaRemoteSessionActive 1
-    Ninja-Property-Set NinjaRemoteSessionEnd ''
-
-    if (!([string]::IsNullOrWhiteSpace($SetTag))) {
-        Write-Host 'Setting NinjaTag'
-        Set-NinjaTag "$SetTag"
+    ## Skip first one here since that is the alwways the default running instance
+    foreach ($NRP in ($NRProcess | Select-Object -Skip 1)) {
+        try {
+            if (!(Test-Path "$NRLogsLocation\NRPID_$($NRP.ProcessID)")) {
+                New-Item "$NRLogsLocation\NRPID_$($NRP.ProcessID)" -Force -ErrorAction Stop
+            }
+        }
+        catch {
+            Write-Host 'Unable to record the NR Remote Process ID for use in collecting the session end time. Exiting.'
+            Write-Host "$($_.Exception.Message)"
+            exit 0
+        }
     }
 
+    if ([String]::IsNullOrWhiteSpace($CheckifStartTimeExists) -or (!([datetime]$CheckifStartTimeExists -match [datetime]$NRStartTime))) {
+   
+        Ninja-Property-Set NinjaRemoteSessionStart ($NRStartTime.ToString("yyyy-MM-dd HH:mm:ss"))
+        Ninja-Property-Set NinjaRemoteSessionActive 1
+        Ninja-Property-Set NinjaRemoteSessionEnd ''
+    
+        if (!([string]::IsNullOrWhiteSpace($SetTag))) {
+            Write-Host 'Setting NinjaTag'
+            Set-NinjaTag "$SetTag"
+        }
+    }
     exit 0
 }
-
-$CheckifStartTimeExists = Ninja-Property-Get NinjaRemoteSessionStart
-$CheckifEndTimeExists = Ninja-Property-Get NinjaRemoteSessionEnd
 
 if (!([string]::IsNullOrWhiteSpace($CheckifEndTimeExists)) -or ([string]::IsNullOrWhiteSpace($CheckifStartTimeExists))) {
     Write-Host 'End time already exists or there was no previously recorded start time. Exiting.'
     exit 0
 }
 
-$LastNRLog = Get-ChildItem $NRLogsLocation | 
-Where-Object { ($_.Name -match 'ncstreamer') -and ($_.Name -notmatch 'ncstreamer_') } | 
-Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$AllNRLogs = Get-ChildItem $NRLogsLocation | Where-Object { ($_.Name -match 'ncstreamer') -and ($_.Name -notmatch 'ncstreamer_') } | 
+Sort-Object LastWriteTime
 
-$LastNRPID = Get-ChildItem $NRLogsLocation | Where-Object { $_.Name -match 'NRPID_' } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$AllSessions = foreach ($NRPID in $NRPIDFiles) {
+    try {
+        $NRPIDConfirmation = ($NRPID).Name.Substring(6)
+    }
+    catch {
+        Write-Host "File: $($NRPID.Name) isn't in the expected format. Skipping..."
+        Write-Host "$($_.Exception.Message)"
+        continue
+    }
+
+    $MatchingNRPIDLog = $AllNRLogs | Where-Object { $_.Name -match $NRPIDConfirmation }
+
+    if (!($MatchingNRPIDLog)) {
+        Write-Host "Unable to match NRPID $NRPIDConfirmation with a log file. Skipping..."
+        continue
+    }
+
+    $Content = (Get-Content $MatchingNRPIDLog.FullName | Where-Object { $_ -match 'ProcessSessionId:' }).ToString()
+    $SessionID = [regex]::Match($Content, 'ProcessSessionId:\s*\d+').Value
+    
+    if ($SessionID -match '0') {
+        $SessionType = 'Background Mode'  
+    }
+    else {
+        $SessionType = 'Normal Mode'
+    } 
+
+    $NRSessionEndTime = $($MatchingNRPIDLog.LastWriteTime).ToString("yyyy-MM-dd HH:mm:ss")
+    $SessionDuration = $MatchingNRPIDLog.LastWriteTime - $MatchingNRPIDLog.CreationTime
+
+    [PSCustomObject]@{
+        'Session Start'    = $MatchingNRPIDLog.CreationTime.ToString("yyyy-MM-dd HH:mm:ss")
+        'Session End'      = $NRSessionEndTime
+        'Session Type'     = $SessionType
+        'Session Duration' = '{0:D2} Days | {1:D2} Hours | {2:D2} Minutes | {3:D2} Seconds' -f $SessionDuration.Days, $SessionDuration.Hours, $SessionDuration.Minutes, $SessionDuration.Seconds
+    }
+}
+
+Update-NRSessionHistory -UpdateAllSessions $AllSessions
+
+$LastNRPID = $NRPIDFiles | Select-Object -Last 1
 
 try {
     $NRPIDConfirmation = ($LastNRPID).Name.Substring(6)
@@ -153,69 +267,23 @@ catch {
     exit 0
 }
 
-if (!($LastNRLog -match $NRPIDConfirmation)) {
+$MatchingNRPIDLog = $AllNRLogs | Where-Object { $_.Name -match $NRPIDConfirmation }
+
+if (!($MatchingNRPIDLog)) {
     Write-Host 'Unable to match last NR session process ID. Exiting.'
     exit 0
 }
 
-$NRSessionEndTime = $($LastNRLog.LastWriteTime).ToString("yyyy-MM-dd HH:mm")
-$SessionDuration = $LastNRLog.LastWriteTime - $LastNRLog.CreationTime
+$NRSessionEndTime = $($MatchingNRPIDLog.LastWriteTime).ToString("yyyy-MM-dd HH:mm:ss")
 
-$CompleteRecord = [PSCustomObject]@{
-    'Session Start'    = $LastNRLog.CreationTime.ToString("yyyy-MM-dd HH:mm")
-    'Session End'      = $NRSessionEndTime
-    'Session Duration' = '{0:D2} Days | {1:D2} Hours | {2:D2} Minutes | {3:D2} Seconds' -f $SessionDuration.Days, $SessionDuration.Hours, $SessionDuration.Minutes, $SessionDuration.Seconds
-}
-
-$CheckHTML = Ninja-Property-Get NinjaRemoteSessionHistory
-if (($CheckHTML | ConvertFrom-Json).html) {
-    [xml]$HTMLtoXML = ($CheckHTML | ConvertFrom-Json).html
-    $THeaders = $HTMLtoXML.SelectNodes("//thead/tr/th") | ForEach-Object { $_.InnerText }
-    $TRows = $HTMLtoXML.SelectNodes("//tbody/tr")
-    $HTMLtoObject = [System.Collections.Generic.List[object]]::New()
-    foreach ($Row in $TRows) {
-        $Value = $Row.td
-        if ([string]::IsNullorWhiteSpace($Value)) { 
-            continue 
-        }
-        $RowObject = [PSCustomObject]@{}
-        for ($i = 0; $i -lt $THeaders.Count; $i++) {
-            $RowObject | Add-Member -MemberType NoteProperty -Name $THeaders[$i] -Value $Value[$i]
-        }
-        $HTMLtoObject.Add($RowObject)
-    }
-
-    $HTMLtoObject.Add($CompleteRecord) 
-    $HTMLtoObject = $HTMLtoObject | Sort-Object 'Session Start' -Descending
-
-    if ($HTMLtoObject.Count -gt $SessionsToKeep) {
-        $HTMLtoObject = $HTMLToObject[0..($HTMLToObject.Count - ($SessionsToKeep + 1))]
-    }
-
-    ##WYSIWYG fields have a limit of 200k characters. This will remove the oldest entry
-    ## if character length is 190k or more, ensuring enough space for the most recent entry.
-    if ($CheckHTML.Length -ge 190000) {
-        Write-Host 'Removing oldest entry due to character limit...'
-        $HTMLtoObject = $HTMLToObject[0..($HTMLToObject.Count - 2)]
-    }
-
-    $HTML = ConvertTo-HTMLTable $HTMLtoObject
-    $HTML | Ninja-Property-Set-Piped NinjaRemoteSessionHistory
-    Ninja-Property-Set NinjaRemoteSessionEnd $NRSessionEndTime
-    Ninja-Property-Set NinjaRemoteSessionActive 0
-}
-else {
-    $HTML = ConvertTo-HTMLTable $CompleteRecord
-    $HTML | Ninja-Property-Set-Piped NinjaRemoteSessionHistory
-    Ninja-Property-Set NinjaRemoteSessionEnd $NRSessionEndTime
-    Ninja-Property-Set NinjaRemoteSessionActive 0
-}
+Ninja-Property-Set NinjaRemoteSessionEnd $NRSessionEndTime
+Ninja-Property-Set NinjaRemoteSessionActive 0
 
 if (!([string]::IsNullOrWhiteSpace($SetTag))) {
     Write-Host 'Removing NinjaTag'
     Remove-NinjaTag "$SetTag"
 }
 
-Remove-Item $LastNRPID.FullName -Force
+$NRPIDFiles | Remove-Item -Force
 
 exit 0
