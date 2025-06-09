@@ -136,7 +136,7 @@ function Update-NRSessionHistory {
         $HTMLtoObject = $HTMLtoObject | Sort-Object 'Session Start' -Descending
 
         if ($HTMLtoObject.Count -gt $SessionsToKeep) {
-            $HTMLtoObject = $HTMLToObject[0..($HTMLToObject.Count - ($SessionsToKeep + 1))]
+            $HTMLtoObject = $HTMLToObject[0..($SessionsToKeep - 1)]
         }
 
         ## WYSIWYG fields have a limit of 200k characters. This will remove the oldest entry
@@ -153,6 +153,19 @@ function Update-NRSessionHistory {
         $HTML = ConvertTo-HTMLTable $UpdateAllSessions
         $HTML | Ninja-Property-Set-Piped NinjaRemoteSessionHistory
     }
+}
+
+function Clear-NRSessionCustomFields {
+
+    Ninja-Property-Set NinjaRemoteSessionActive 0
+    Ninja-Property-Set NinjaRemoteSessionStart ''
+    Ninja-Property-Set NinjaRemoteSessionEnd ''
+
+    if (!([string]::IsNullOrWhiteSpace($SetTag))) {
+        Write-Host 'Removing NinjaTag'
+        Remove-NinjaTag "$SetTag"
+    }
+
 }
 
 #### End Functions ####
@@ -180,7 +193,7 @@ if (($NRProcess | Measure-Object).Count -gt 1) {
             Where-Object { $_.Name -match "ncstreamer$($NRDetails.ProcessID)" }).CreationTime
     }
 
-    ## Skip first one here since that is the alwways the default running instance
+    ## Skip first one here since that is the always the default parent instance
     foreach ($NRP in ($NRProcess | Select-Object -Skip 1)) {
         try {
             if (!(Test-Path "$NRLogsLocation\NRPID_$($NRP.ProcessID)")) {
@@ -254,6 +267,13 @@ $AllSessions = foreach ($NRPID in $NRPIDFiles) {
     }
 }
 
+if (!($AllSessions)) {
+    Write-Host 'No active sessions and no previous sessions found to update.'
+    Write-Host 'Resetting NR Session Active, StartTime, EndTime and Tag if applicable.'
+    Clear-NRSessionCustomFields
+    exit 0
+}
+
 Update-NRSessionHistory -UpdateAllSessions $AllSessions
 
 $LastNRPID = $NRPIDFiles | Select-Object -Last 1
@@ -264,6 +284,7 @@ try {
 catch {
     Write-Host 'Unable to determine previous NR Session process ID. Exiting.'
     Write-Host "$($_.Exception.Message)"
+    Clear-NRSessionCustomFields
     exit 0
 }
 
@@ -271,6 +292,7 @@ $MatchingNRPIDLog = $AllNRLogs | Where-Object { $_.Name -match $NRPIDConfirmatio
 
 if (!($MatchingNRPIDLog)) {
     Write-Host 'Unable to match last NR session process ID. Exiting.'
+    Clear-NRSessionCustomFields
     exit 0
 }
 
