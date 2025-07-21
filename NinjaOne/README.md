@@ -13,3 +13,6 @@ Script that allows a felxible reboot day and time schedule as defined in a custo
 
 ## 4. Vulnerability Import & Log
 This script is used to import a vulnerability csv file exported from various vulnerability scan tools/platforms.
+
+## 5. Install NinjaOne - macOS
+Installs the NinjaOne macOS agent. Can be used to deploy via third party MDM provider or locally. Handles both generic agent installer with token or generated URL.
