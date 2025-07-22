@@ -78,10 +78,13 @@ fi
 
 Write-LogEntry 'Downloading installer...'
 
-curl -L "$URL" -o "$Folder/$Filename"
+if ! curl -fSL "$URL" -o "$Folder/$Filename"; then
+    Write-LogEntry 'Download failed. Exiting Script.'
+    exit 1
+fi
 
-if [[ ! -f "$Folder/$Filename" ]]; then
-    Write-LogEntry 'Download failed. Exiting script.'
+if [[ ! -s "$Folder/$Filename" ]]; then
+    Write-LogEntry 'Downloaded an empty file. Exiting.'
     exit 1
 fi
 
