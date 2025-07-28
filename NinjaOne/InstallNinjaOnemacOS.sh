@@ -10,6 +10,7 @@
 # Author: Mark Giordano
 # Date: 05/02/2025
 # Description: Install NinjaOne Agent - macOS
+# Update: Added additional logic.
 # ---------------------------------------------------------------
 
 Write-LogEntry() {
@@ -55,7 +56,7 @@ if [[ -d "$CheckApp" ]]; then
     exit 1
 fi
 
-if [[ "$Filename" == *.dmg ]]; then
+if [[ "$Filename" != *.pkg ]]; then
     Write-LogEntry 'Only PKG files are supported in this script. Cannot continue.'
     exit 1
 fi
@@ -67,7 +68,7 @@ if [[ "$Filename" == 'NinjaOneAgent-x64.pkg' ]]; then
     fi
 
     Write-LogEntry 'Token provided and generic installer being used. Continuing...'
-    echo "$Token" > "$Folder/.~"
+    echo "$Token" >"$Folder/.~"
 else
     if [[ -n "$Token" ]]; then
         Write-LogEntry 'A token was provided, but the URL appears to be for a generated installer and not the generic installer.'
@@ -85,6 +86,11 @@ fi
 
 if [[ ! -s "$Folder/$Filename" ]]; then
     Write-LogEntry 'Downloaded an empty file. Exiting.'
+    exit 1
+fi
+
+if ! pkgutil --check-signature "$Folder/$Filename" | grep -q "NinjaRMM LLC"; then
+    Write-LogEntry 'PKG file is not signed by NinjaOne. Cannot continue.'
     exit 1
 fi
 
