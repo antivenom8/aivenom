@@ -20,6 +20,7 @@
     Type: String/Text
     This allows you to enter the 2 letter set to indicate the language the pop up should display in.
     This will override the detection part of the script so it doesn't use the detected languade from OS.
+    https://en.wikipedia.org/wiki/List_of_ISO_639_language_codes
     
 #>
 
