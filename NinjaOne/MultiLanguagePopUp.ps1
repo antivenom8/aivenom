@@ -11,6 +11,8 @@
     # ---------------------------------------------------------------
 
 .NOTES
+    Script MUST be set to Run as Current Logged On User, not system.
+
     Script Form Variables
 
     Name: Threshold
@@ -29,7 +31,7 @@
 
     Name: Message
     Type: String/Text
-    Set the text of the messaage area. If left blank, will use the defaults in the script. 
+    Set the text of the message area. If left blank, will use the defaults in the script. 
 
     Name: Reboot Button
     Type: String/Text
@@ -62,6 +64,13 @@ function Get-Translation {
     }
 }
 
+# Script should run as current logged on user, so this checks for system and exits if true.
+if ([Security.Principal.WindowsIdentity]::GetCurrent().User.IsWellKnown([Security.Principal.WellKnownSidType]::LocalSystemSid)) {
+    Write-Host 'Script is currently running as system, but needs to be ran as current logged on user. Exiting.'
+    exit 0
+}
+
+
 $Threshold = [int]$env:Threshold
 if (!($Threshold)) {
     Write-Host 'No threshold entered. Cannot continue.'
@@ -72,7 +81,7 @@ Add-Type -AssemblyName PresentationCore, PresentationFramework | Out-Null
 
 $DaysSinceLastReboot = (New-TimeSpan -Start ((Get-CimInstance Win32_OperatingSystem).LastBootUpTime) -End ([DateTime]::Now)).Days
 
-# Exiting immediately if the computer has been up for less than 10 days.
+# Exiting immediately if the computer has been up for less than entered threshold.
 if ($DaysSinceLastReboot -lt $Threshold) {
     Write-Host "Computer uptime is at $($DaysSinceLastReboot) days. Reboot not needed. Exiting."
     exit 0
@@ -88,6 +97,11 @@ $PopupDetails = @{
 $Culture = Get-UICulture
 $OSLanguage = $($Culture.TwoLetterISOLanguageName)
 if ($env:Language) {
+    if ($env:Language.Length -gt 2) {
+        Write-Host 'Please use only 2 digit ISO 639 codes. See here for codes:'
+        Write-Host 'https://en.wikipedia.org/wiki/List_of_ISO_639_language_codes'
+        exit 0
+    }
     $OSLanguage = $env:Language
 }
 
@@ -166,7 +180,7 @@ $RebootButton.Add_Click({
             Write-Host "Failed to restart computer. The following error occured:"
             Write-Host "$($_.Exception.Message)"
         }
-        $Windows.Close()
+        $Window.Close()
     })
 
 $CancelButton.Add_Click({ $Window.Close() })
