@@ -70,6 +70,14 @@ if ([Security.Principal.WindowsIdentity]::GetCurrent().User.IsWellKnown([Securit
     exit 0
 }
 
+if (($env:Title) -and ($env:Title.Length -gt 50)){
+    Write-Host 'Reboot Button as a character limit of 50. Please shorten the text to display on the button.'
+    exit 0
+}
+if (($env:Message) -and ($env:Message.Length -gt 250)){
+    Write-Host 'Reboot Button as a character limit of 250. Please shorten the text to display on the button.'
+    exit 0
+}
 if (($env:RebootButton) -and ($env:RebootButton.Length -gt 35)){
     Write-Host 'Reboot Button as a character limit of 35. Please shorten the text to display on the button.'
     exit 0
