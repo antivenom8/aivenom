@@ -70,6 +70,14 @@ if ([Security.Principal.WindowsIdentity]::GetCurrent().User.IsWellKnown([Securit
     exit 0
 }
 
+if (($env:RebootButton) -and ($env:RebootButton.Length -gt 35)){
+    Write-Host 'Reboot Button as a character limit of 35. Please shorten the text to display on the button.'
+    exit 0
+}
+if (($env:CancelButton) -and ($env:CancelButton.Length -gt 35)){
+    Write-Host 'Reboot Button as a character limit of 35. Please shorten the text to display on the button.'
+    exit 0
+}
 
 $Threshold = [int]$env:Threshold
 if (!($Threshold)) {
