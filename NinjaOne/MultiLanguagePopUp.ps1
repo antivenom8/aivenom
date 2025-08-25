@@ -12,6 +12,7 @@
 
 .NOTES
     Script Form Variables
+
     Name: Threshold
     Type: Int
     Set the # of days the device needs to be up by to determine if a reboot is needed.
@@ -21,6 +22,22 @@
     This allows you to enter the 2 letter set to indicate the language the pop up should display in.
     This will override the detection part of the script so it doesn't use the detected languade from OS.
     https://en.wikipedia.org/wiki/List_of_ISO_639_language_codes
+
+    Name: Title
+    Type: String/Text
+    Set the text of the popup box title. If left blank, will use the defaults in the script.
+
+    Name: Message
+    Type: String/Text
+    Set the text of the messaage area. If left blank, will use the defaults in the script. 
+
+    Name: Reboot Button
+    Type: String/Text
+    Set the text of the reboot button. If left blank, will use the defaults in the script.
+
+    Name: Cancel Button
+    Type: String/Text
+    Set the text of the cancel button. If left blank, will use the defaults in the script.
     
 #>
 
@@ -62,10 +79,10 @@ if ($DaysSinceLastReboot -lt $Threshold) {
 }
 
 $PopupDetails = @{
-    Title        = 'Reboot Recommended'
-    Msg          = "To maintain optimal performance, please reboot your computer every $($Threshold) days."
-    RebootButton = 'Reboot Now'
-    CancelButton = 'Cancel' 
+    Title        = if ($env:Title) { $env:Title } else { 'Reboot Recommended' }
+    Msg          = if ($env:Message) { $env:Message } else { "To maintain optimal performance, please reboot your computer every $($Threshold) days." }
+    RebootButton = if ($env:RebootButton) { $env:RebootButton } else { 'Reboot Now' }
+    CancelButton = if ($env:CancelButton) { $env:CancelButton } else { 'Cancel' }
 }
 
 $Culture = Get-UICulture
