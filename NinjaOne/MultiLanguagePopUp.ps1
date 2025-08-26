@@ -114,14 +114,14 @@ $Culture = Get-UICulture
 $OSLanguage = $($Culture.TwoLetterISOLanguageName)
 if ($env:Language) {
     if ($env:Language.Length -gt 2) {
-        Write-Host 'Please use only 2 digit ISO 639 codes. See here for codes:'
+        Write-Host 'Please use only 2 letter ISO 639 codes. See here for codes:'
         Write-Host 'https://en.wikipedia.org/wiki/List_of_ISO_639_language_codes'
         exit 0
     }
     $OSLanguage = $env:Language
 }
 
-if ($ToLanguage -ne 'en') {
+if ($OSLanguage -ne 'en') {
     foreach ($Key in @($PopupDetails.Keys)) {
         $PopupDetails[$Key] = Get-Translation -Original $PopupDetails[$Key] -TargetLanguage $OSLanguage
     }
