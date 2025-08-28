@@ -67,6 +67,11 @@ if [[ "$Filename" == 'NinjaOneAgent-x64.pkg' ]]; then
         exit 1
     fi
 
+    if [[ ! $Token =~ ^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$ ]]; then
+        Write-LogEntry 'An invalid token was provided. Please ensure it was entered correctly.'
+        exit 1
+    fi
+
     Write-LogEntry 'Token provided and generic installer being used. Continuing...'
     echo "$Token" >"$Folder/.~"
 else
