@@ -18,4 +18,4 @@ This script is used to import a vulnerability csv file exported from various vul
 Installs the NinjaOne macOS agent. Can be used to deploy via third party MDM provider or locally. Handles both generic agent installer with token or generated URL.
 
 ## 6. Multilanguage Popup
-Displays a pop up with a reboot reminder and 3 minute timer to auto cancel. Hit's Google's unofficial tranlate API to display the text in the installed language of the OS.
+Displays a pop up with a reboot reminder and 3 minute timer to auto cancel. Hits Google's unofficial tranlate API to display the text in the installed language of the OS.
