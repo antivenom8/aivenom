@@ -48,8 +48,7 @@
 #>
 
 $TimeWindow = 30
-#$RebootDayTime = Ninja-Property-Get RebootDayTime
-$RebootDayTime = '2|Friday|23:00'
+$RebootDayTime = Get-NinjaProperty RebootDayTime
 
 # Function to determine the nth occurrence of a given weekday in the specified month/year
 function Get-NthOccurrence {
