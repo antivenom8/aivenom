@@ -156,43 +156,6 @@ switch ($RebootOccurrence) {
     }
 }
 
-
-
-# if (!($RebootOccurance -match 'Weekly|Daily')) {
-#     # Validate the occurrence as an integer
-#     if (!([int]::TryParse($RebootOccurance, [ref]$null))) {
-#         Write-Host 'Error: The first part must be an integer representing the occurrence (e.g. 2).'
-#         exit 0
-#     }
-
-#     [int]$Nth = $RebootOccurance
-
-#     if ($Nth -le 0) {
-#         Write-Host 'Error: The occurrence must be a positive integer.'
-#         exit 0
-#     }
-
-#     # Get the reoccurance
-#     $NthOccurrence = Get-NthOccurrence -Year $CurrentYear -Month $CurrentMonth -Weekday $RebootDay -Occurrence $RebootOccurance
-
-#     if (!($NthOccurrence)) {
-#         Write-Host "Error: There are not $Nth $($RebootDay)s in this month."
-#         exit 0
-#     }
-
-#     # Check if today is the nth occurrence of the specified weekday
-#     if ($Now.Date -ne $NthOccurrence) {
-#         Write-Host "Today is not the $Nth $RebootDay ($($NthOccurrence.ToShortDateString())). Exiting."
-#         exit 0
-#     }
-# }
-# else {
-#     if ($Now.DayofWeek -ne "$RebootDay") {
-#         Write-Host "Today is not the scheduled reboot day: $RebootDay"
-#         exit 0
-#     }
-# }
-
 # Validate the time (HH:MM in 24-hour format)
 $TimePattern = '^(0[0-9]|1[0-9]|2[0-3]):[0-5][0-9]$'
 if ($RebootTime -notmatch $TimePattern) {
