@@ -61,7 +61,7 @@ if [[ "$Filename" != *.pkg ]]; then
     exit 1
 fi
 
-if [[ "$Filename" == 'NinjaOneAgent-x64.pkg' ]]; then
+if [[ "$Filename" == 'NinjaOneAgent.pkg' ]]; then
     if [[ -z "$Token" ]]; then
         Write-LogEntry 'A generic install URL was provided with no token. Please provide a token to use the generic installer. Exiting.'
         exit 1
