@@ -19,3 +19,7 @@ Installs the NinjaOne macOS agent. Can be used to deploy via third party MDM pro
 
 ## 6. Multilanguage Popup
 Displays a pop up with a reboot reminder and 3 minute timer to auto cancel. Hits Google's unofficial tranlate API to display the text in the installed language of the OS.
+
+## 7. Remote Access Tools Detection
+Utilizes collected data from https://lolrmm.io/ by pulling down their json payload and parsing the data into useable bits of info. Search vectors include App Name, Registry, Services, Processes, Scheduled Tasks and DNS Cache. 
+Recorded to WYSIWYG with additional info on hover, as well as a text custom field with confidence scoring based on detection for easy reporting and filtering. Includes the ability to exclude tools at System/Org/Location/Device level. 
