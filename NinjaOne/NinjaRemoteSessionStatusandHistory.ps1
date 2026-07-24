@@ -94,7 +94,7 @@ function Update-NRSessionHistory {
         [PSCustomObject[]]$UpdateAllSessions
     )
 
-    $CheckHTML = Ninja-Property-Get NinjaRemoteSessionHistory
+    $CheckHTML = Get-NinjaProperty NinjaRemoteSessionHistory
     Start-Sleep 5
     if (($CheckHTML | ConvertFrom-Json).html) {
         [xml]$HTMLtoXML = ($CheckHTML | ConvertFrom-Json).html
@@ -147,19 +147,19 @@ function Update-NRSessionHistory {
         }
 
         $HTML = ConvertTo-HTMLTable $HTMLtoObject
-        $HTML | Ninja-Property-Set-Piped NinjaRemoteSessionHistory
+        $HTML | Set-NinjaProperty NinjaRemoteSessionHistory
     }
     else {
         $HTML = ConvertTo-HTMLTable $UpdateAllSessions
-        $HTML | Ninja-Property-Set-Piped NinjaRemoteSessionHistory
+        $HTML | Set-NinjaProperty NinjaRemoteSessionHistory
     }
 }
 
 function Clear-NRSessionCustomFields {
 
-    Ninja-Property-Set NinjaRemoteSessionActive 0
-    Ninja-Property-Set NinjaRemoteSessionStart ''
-    Ninja-Property-Set NinjaRemoteSessionEnd ''
+    Set-NinjaProperty NinjaRemoteSessionActive 0
+    Set-NinjaProperty NinjaRemoteSessionStart ''
+    Set-NinjaProperty NinjaRemoteSessionEnd ''
 
     if (!([string]::IsNullOrWhiteSpace($SetTag))) {
         Write-Host 'Removing NinjaTag'
@@ -171,13 +171,13 @@ function Clear-NRSessionCustomFields {
 #### End Functions ####
 
 $SessionsToKeep = 30
-$NRLogsLocation = "$env:systemroot\temp"
+$NRLogsLocation = "$env:systemroot\systemtemp"
 $SetTag = $env:setTag
 
 $NRPIDFiles = Get-ChildItem $NRLogsLocation | Where-Object { $_.Name -match 'NRPID_' } | Sort-Object LastWriteTime
-$CheckifStartTimeExists = Ninja-Property-Get NinjaRemoteSessionStart
+$CheckifStartTimeExists = Get-NinjaProperty NinjaRemoteSessionStart
 Start-Sleep 3
-$CheckifEndTimeExists = Ninja-Property-Get NinjaRemoteSessionEnd
+$CheckifEndTimeExists = Get-NinjaProperty NinjaRemoteSessionEnd
 Start-Sleep 3
 
 $NRProcess = Get-CimInstance Win32_Process | Where-Object { $_.Name -eq "ncstreamer.exe" } | 
@@ -209,9 +209,9 @@ if (($NRProcess | Measure-Object).Count -gt 1) {
 
     if ([String]::IsNullOrWhiteSpace($CheckifStartTimeExists) -or (!([datetime]$CheckifStartTimeExists -match [datetime]$NRStartTime))) {
    
-        Ninja-Property-Set NinjaRemoteSessionStart ($NRStartTime.ToString("yyyy-MM-dd HH:mm:ss"))
-        Ninja-Property-Set NinjaRemoteSessionActive 1
-        Ninja-Property-Set NinjaRemoteSessionEnd ''
+        Set-NinjaProperty NinjaRemoteSessionStart ($NRStartTime.ToString("yyyy-MM-dd HH:mm:ss"))
+        Set-NinjaProperty NinjaRemoteSessionActive 1
+        Set-NinjaProperty NinjaRemoteSessionEnd ''
     
         if (!([string]::IsNullOrWhiteSpace($SetTag))) {
             Write-Host 'Setting NinjaTag'
@@ -298,8 +298,8 @@ if (!($MatchingNRPIDLog)) {
 
 $NRSessionEndTime = $($MatchingNRPIDLog.LastWriteTime).ToString("yyyy-MM-dd HH:mm:ss")
 
-Ninja-Property-Set NinjaRemoteSessionEnd $NRSessionEndTime
-Ninja-Property-Set NinjaRemoteSessionActive 0
+Set-NinjaProperty NinjaRemoteSessionEnd $NRSessionEndTime
+Set-NinjaProperty NinjaRemoteSessionActive 0
 
 if (!([string]::IsNullOrWhiteSpace($SetTag))) {
     Write-Host 'Removing NinjaTag'
