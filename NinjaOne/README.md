@@ -18,7 +18,7 @@ This script is used to import a vulnerability csv file exported from various vul
 Installs the NinjaOne macOS agent. Can be used to deploy via third party MDM provider or locally. Handles both generic agent installer with token or generated URL.
 
 ## 6. Multilanguage Popup
-Displays a pop up with a reboot reminder and 3 minute timer to auto cancel. Hits Google's unofficial tranlate API to display the text in the installed language of the OS.
+Displays a pop up with a reboot reminder and 3 minute timer to auto cancel. Hits Google's unofficial translate API to display the text in the installed language of the OS.
 
 ## 7. Remote Access Tools Detection
 Utilizes collected data from https://lolrmm.io/ by pulling down their json payload and parsing the data into useable bits of info. Search vectors include App Name, Registry, Services, Processes, Scheduled Tasks and DNS Cache. 
