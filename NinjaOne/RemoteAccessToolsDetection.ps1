@@ -1,69 +1,12 @@
-<#
-.SYNOPSIS
-This script is used to detect installed or active Remote Access Tools (RMM/RATs) on an endpoint.
 
-.DESCRIPTION
-Script pulls the LOLRMM tool database from lolrmm.io and keeps a local cached copy for fallback. 
-It parses each tool's known executables, domains, file names, and install paths then scans the device 
-across multiple vectors: running processes, services, DNS client cache, 
-installed software (registry uninstall keys under HKLM and every user hive, including unloaded profiles)
-and scheduled tasks. Microsoft-signed items are filtered out. Each detected tool is assigned a confidence
-score based on how many vectors matched, and results are written to custom fields as both a plain-text 
-summary and a color-coded WYSIWYG HTML table.
-
-# ---------------------------------------------------------------
-# Author: Mark Giordano
-# Date: June 29th, 2026
-# Description: Detects Remote Access / RMM tools and reports findings to custom fields.
-# ---------------------------------------------------------------
-
-.NOTES
-### Requried Custom Fields ###
-Name: RemoteAccessTools
-Type: WYSIWYG
-
-Name: DetectedRATs
-Type: Text
-
-### Optional Custom Fields ###
-Name: RATExclusions
-Type: Text
-Comma-separated list of app/registry names to exclude from findings. Read at runtime and combined with the DefaultRATExclusions script variable.
-
-### Required Script Variables ###
-ITToolsPath
-Type: Text
-Directory path used to store the local rmm_tools.json fallback cache. Referenced as $env:ITToolsPath.
-
-### Optional Script Variables ###
-DefaultRATExclusions
-Type: Text
-Comma-separated list of default exclusions applied on every run. Referenced as $env:DefaultRATExclusions.
-
-Confidence scoring: 
-Matched Process +3
-Registry (installed software) +3
-Process description matches app name +2
-Install path present on disk +2
-DNS cache hit +2
-Scheduled task +2
-Service +1.
-
-HTML row coloring is driven by the confidence score:
-8 or higher = danger
-5-7 = warning
-3-4 = other
-below 3 = unknown
-
-Pulls the latest tool database. If the remote pull fails, it falls back to the locally cached json.
-If neither source is available, the script exits 1. If no tools are found, the RemoteAccessTools and
-DetectedRATs custom fields are cleared. Exits 0 on completion.
-#>
-
+function ConvertTo-HtmlSafe {
+    param ([string]$Value)
+    return [System.Net.WebUtility]::HtmlEncode($Value)
+}
 function Convert-ToHTMLCell {
     param ([string]$Value)
     if ([string]::IsNullOrEmpty($Value)) { return '' }
-    return ($Value -split "`n" | ForEach-Object { "<div>$_</div>" }) -join ''
+    return ($Value -split "`n" | ForEach-Object { "<div>$(ConvertTo-HtmlSafe $_)</div>" }) -join ''
 }
 
 function Convert-ToHTMLCellWithTooltip {
@@ -74,7 +17,7 @@ function Convert-ToHTMLCellWithTooltip {
     if (!$Names -or ($Names.Count -eq 1 -and [string]::IsNullOrWhiteSpace($Names[0]))) { return '' }
     $Result = for ($i = 0; $i -lt $Names.Count; $i++) {
         $Tooltip = if ($i -lt $Tooltips.Count) { $Tooltips[$i] } else { '' }
-        "<div>$($Names[$i]) <a title='$Tooltip' style='text-decoration: none;'>⚠️</a></div>"
+        "<div>$(ConvertTo-HtmlSafe $Names[$i]) <a title='$(ConvertTo-HtmlSafe $Tooltip)' style='text-decoration: none;'>⚠️</a></div>"
     }
     return $Result -join ''
 }
@@ -113,14 +56,14 @@ function ConvertTo-NinjaHTML {
             Convert-ToHTMLCellWithTooltip -Names @($Finding.AppName) -Tooltips @($Finding.PathMatches)
         }
         else {
-            $Finding.AppName
+            ConvertTo-HtmlSafe $Finding.AppName
         }
 
         $RegCell = if ($Finding.RegistryVersion -or $Finding.RegistryPublisher -or $Finding.RegistryInstallSource -or $Finding.RegistryInstallLocation) {
             Convert-ToHTMLCellWithTooltip -Names @($Finding.RegistryDisplayName) -Tooltips @("Version: $($Finding.RegistryVersion)`nPublisher: $($Finding.RegistryPublisher)`nInstall Source: $($Finding.RegistryInstallSource)`nInstall Location: $($Finding.RegistryInstallLocation)")
         }
         else {
-            $Finding.RegistryDisplayName
+            ConvertTo-HtmlSafe $Finding.RegistryDisplayName
         }
 
         $HTML += @"
@@ -186,9 +129,12 @@ function Get-LOLRMMData {
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]'Tls12'
         $RemoteTools = Invoke-RestMethod -Uri $ToolsUrl -UseBasicParsing -ErrorAction Stop
-        if (!(Test-Path $LocalPath)) {
-            Write-Host 'No local copy found, saving for future fallback...'
-            $RemoteTools | ConvertTo-Json -Depth 10 | Set-Content $LocalPath
+        try {
+            $RemoteTools | ConvertTo-Json -Depth 10 | Set-Content $LocalPath -ErrorAction Stop
+            Write-Host 'Updated local fallback copy.'
+        }
+        catch {
+            Write-Host "Could not update local fallback copy: $_"
         }
         Write-Host 'Successfully collected tool data from remote.'
         return $RemoteTools
@@ -213,6 +159,33 @@ function Get-LOLRMMData {
     }
 }
 
+$ScriptHosts = 'powershell', 'pwsh', 'cmd', 'wscript', 'cscript', 'mshta', 'rundll32', 'regsvr32', 'conhost'
+
+function Get-ExecutablePath {
+    param([string]$Command)
+    if ([string]::IsNullOrWhiteSpace($Command)) { return $null }
+    $Expanded = [Environment]::ExpandEnvironmentVariables($Command.Trim())
+    $Path = if ($Expanded -match '^"([^"]+)"') { $Matches[1] }
+    elseif ($Expanded -match '^(.+?\.(exe|com|bat|cmd))(\s|$)') { $Matches[1] }
+    else { ($Expanded -split '\s+')[0] }
+
+    # IsPathRooted throws on invalid path chars in Windows PowerShell 5.1; treat as rooted so we skip Get-Command
+    $IsRooted = try { [IO.Path]::IsPathRooted($Path) } catch { $true }
+    if (!$IsRooted) {
+        # Bare names like "powershell.exe" in task actions
+        $Resolved = (Get-Command $Path -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+        if ($Resolved) { $Path = $Resolved }
+    }
+    return $Path
+}
+
+function Test-MicrosoftSigned {
+    param([string]$Path)
+    if (!$Path -or !(Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    $Sig = Get-AuthenticodeSignature -LiteralPath $Path -ErrorAction SilentlyContinue
+    return ($Sig.Status -eq 'Valid' -and $Sig.SignerCertificate.Subject -match 'O=Microsoft Corporation')
+}
+
 $ITToolsPath = "$env:ITToolsPath"
 
 if (!(Test-Path $ITToolsPath)) {
@@ -229,6 +202,13 @@ $Rats = Get-LOLRMMData
 
 Write-Host 'Extracting and parsing data...'
 
+$InstallRoots = @($env:SystemDrive, $env:ProgramFiles, $env:ProgramW6432, ${env:ProgramFiles(x86)}, $env:ProgramData) |
+Where-Object { $_ } | Sort-Object -Unique
+$ProfilePaths = [System.Collections.Generic.List[string]]::new()
+$ProfilePaths.AddRange([string[]]@(Get-CimInstance Win32_UserProfile -ErrorAction SilentlyContinue |
+        Where-Object { $_.SID -match '^S-1-5-21-|^S-1-12-1-' } |
+        Select-Object -ExpandProperty LocalPath))
+
 $ExtractedData = $Rats | ForEach-Object {
     $Name = $_.Name
     $EXEs = $_.Details.InstallationPaths | ForEach-Object {
@@ -236,7 +216,24 @@ $ExtractedData = $Rats | ForEach-Object {
     } | Sort-Object -Unique
     $Domains = $_.Artifacts.Network.Domains
     $FileNames = $_.Details.PEMetadata.FileName
-    $InstallPaths = $_.Details.InstallationPaths | Where-Object { $_ -match '^C:\\' }
+    $InstallPaths = foreach ($Path in $_.Details.InstallationPaths) {
+        if ($Path -match '^C:\\') { $Path }
+        elseif ($Path -match '^\*(\\AppData\\.+)$') {
+            $Suffix = $Matches[1]
+            foreach ($ProfilePath in $ProfilePaths) { "$ProfilePath$Suffix" }
+        }
+        elseif ($Path -match '^\*Users\\\*(\\.+)$') {
+            # "*Users\*\..." - same as above, written without the leading backslash
+            $Suffix = $Matches[1]
+            foreach ($ProfilePath in $ProfilePaths) { "$ProfilePath$Suffix" }
+        }
+        elseif ($Path -match '^\*\\([^*].+)$') {
+            # Unanchored "*\Vendor\..." or "*\ProgramData\..." - try the common install roots
+            $Suffix = $Matches[1]
+            foreach ($Root in $InstallRoots) { "$Root\$Suffix" }
+        }
+        # Bare filenames: already covered by process-name matching
+    }
 
     [PSCustomObject]@{
         AppName      = $Name
@@ -250,23 +247,32 @@ $ExtractedData = $Rats | ForEach-Object {
 Write-Host 'Data parsed. Now performing various searches for matching applications.'
 Write-Host 'This could take a few minutes...'
 
-$RunningProcesses = Get-Process | Where-Object {
-    $_.Company -ne 'Microsoft Corporation' -and
-    $_.Description -notmatch 'Microsoft|Windows'
-} | Select-Object Name, Id, Path, Description, Company
+$CimPaths = @{}
+Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | ForEach-Object { $CimPaths[[int]$_.ProcessId] = $_.ExecutablePath }
+
+$RunningProcesses = Get-Process | Select-Object Name, Id, Description, Company,
+@{ N = 'Path'; E = { if ($_.Path) { $_.Path } else { $CimPaths[$_.Id] } } } |
+Where-Object { $_.Path }   # no readable path = protected system process
 $Services = Get-Service -ErrorAction SilentlyContinue
 $DNSCache = Get-DnsClientCache | Select-Object -ExpandProperty Entry | Sort-Object -Unique
 $InstalledSoftware = Get-InstalledSoftware
 $ScheduledTasks = Get-ScheduledTask -ErrorAction SilentlyContinue
 $GroupedData = $ExtractedData | Group-Object -Property AppName
 
+$ServicePathMap = @{}
+Get-CimInstance Win32_Service -ErrorAction SilentlyContinue | ForEach-Object { $ServicePathMap[$_.Name] = $_.PathName }
 
 $Findings = foreach ($Group in $GroupedData) {
     $AppName = $Group.Name
     $MatchedReg = $InstalledSoftware | Where-Object { $_.DisplayName -match [regex]::Escape($AppName) }
     $MatchedReg = $MatchedReg | Where-Object {
-        $RegDisplayName = $_.DisplayName
-        !($Exclusions | Where-Object { $RegDisplayName -like "*$_*" })
+        # Check name, publisher and install location so e.g. "steamapps" can exclude a game without killing the RAT detection
+        $Reg = $_
+        !($Exclusions | Where-Object {
+                $Reg.DisplayName -like "*$_*" -or
+                $Reg.Publisher -like "*$_*" -or
+                $Reg.InstallLocation -like "*$_*"
+            })
     }
     $AllExes = $Group.Group.Executables | ForEach-Object { $_ } | Sort-Object -Unique
     $AllFileNames = $Group.Group.FileNames | ForEach-Object { $_ } | Sort-Object -Unique
@@ -278,28 +284,34 @@ $Findings = foreach ($Group in $GroupedData) {
     ForEach-Object { $_ -replace '\.exe$', '' } | 
     Sort-Object -Unique
 
-    $MatchedProcess = $RunningProcesses | Where-Object { $_.Name -in $AllProcessNames }
+    $ExactNames = $AllProcessNames | Where-Object { $_ -notmatch '[*?]' }
+    # Require 4+ literal chars so a pattern like "*" can't match every process
+    $NamePatterns = $AllProcessNames | Where-Object { $_ -match '[*?]' -and ($_ -replace '[*?]', '').Length -ge 4 }
+
+    $MatchedProcess = $RunningProcesses | Where-Object {
+        $ProcName = $_.Name
+        ($ProcName -in $ExactNames -or ($NamePatterns | Where-Object { $ProcName -like $_ })) -and
+        !(Test-MicrosoftSigned $_.Path)
+    }
     $MatchedProcess = $MatchedProcess | Where-Object {
         $ProcessPath = $_.Path
         !($Exclusions | Where-Object { $ProcessPath -like "*$_*" })
     }
+
     $MatchedService = $Services | Where-Object {
         $_.Name -like "*$AppName*" -or $_.DisplayName -like "*$AppName*"
     } | ForEach-Object {
         $Service = $_
-        $ServicePath = (Get-CimInstance Win32_Service -Filter "Name='$($Service.Name)'" -ErrorAction SilentlyContinue).PathName -replace '"', '' -replace ' -.*$', ''
-        
-        if ($ServicePath -and (Test-Path $ServicePath -ErrorAction SilentlyContinue)) {
-            $VersionInfo = (Get-Item $ServicePath -ErrorAction SilentlyContinue).VersionInfo
-            $IsMicrosoft = $VersionInfo.CompanyName -match 'Microsoft' -or
-            $VersionInfo.ProductName -match 'Microsoft' -or
-            $VersionInfo.FileDescription -match 'Microsoft'
-            if (!$IsMicrosoft) {
-                $Service | Add-Member -NotePropertyName ServicePath -NotePropertyValue $ServicePath -PassThru
-            }
+        $BinaryToCheck = Get-ExecutablePath $ServicePathMap[$Service.Name]
+    
+        # svchost-hosted: the code that runs is the ServiceDll, not svchost
+        if ($BinaryToCheck -match '\\svchost\.exe$') {
+            $Dll = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\$($Service.Name)\Parameters" -Name ServiceDll -ErrorAction SilentlyContinue).ServiceDll
+            if ($Dll) { $BinaryToCheck = [Environment]::ExpandEnvironmentVariables($Dll) }
         }
-        else {
-            $Service | Add-Member -NotePropertyName ServicePath -NotePropertyValue $ServicePath -PassThru
+    
+        if (!(Test-MicrosoftSigned $BinaryToCheck)) {
+            $Service | Add-Member -NotePropertyName ServicePath -NotePropertyValue $BinaryToCheck -PassThru -Force
         }
     }
 
@@ -314,39 +326,34 @@ $Findings = foreach ($Group in $GroupedData) {
         $CacheEntry = $_
         $AllDomains | Where-Object { $CacheEntry -like "*$_*" }
     }
-    $MatchedPaths = $AllInstallPaths | Where-Object { Test-Path $_ -ErrorAction SilentlyContinue } | Where-Object {
-        $Item = Get-Item $_ -ErrorAction SilentlyContinue
-        if ($Item -and !$Item.PSIsContainer) {
-            $Item.VersionInfo.ProductName -notmatch 'Microsoft' -and
-            $Item.VersionInfo.CompanyName -notmatch 'Microsoft'
-        }
-        else {
-            $true
-        }
+    $MatchedPaths = $AllInstallPaths |
+    ForEach-Object { Get-Item -Path $_ -Force -ErrorAction SilentlyContinue } |
+    Where-Object { $_.PSIsContainer -or !(Test-MicrosoftSigned $_.FullName) } |
+    Select-Object -ExpandProperty FullName |
+    Where-Object {
+        $MatchedPath = $_
+        !($Exclusions | Where-Object { $MatchedPath -like "*$_*" })
     }
 
     $MatchedTasks = $ScheduledTasks | Where-Object {
         $Task = $_
-        $TaskAction = $Task.Actions | Where-Object { $_.Execute -match [regex]::Escape($AppName) }
-        $Task.TaskName -like "*$AppName*" -or 
-        $TaskAction
+        $Task.TaskName -like "*$AppName*" -or
+        ($Task.Actions | Where-Object { $_.Execute -match [regex]::Escape($AppName) })
     } | Where-Object {
-        $_.Author -notmatch 'Microsoft'
+        $Exes = @($_.Actions | Where-Object { $_.Execute } | ForEach-Object { Get-ExecutablePath $_.Execute })
+        if (!$Exes) { return $true }   # COM-handler-only task: can't verify, keep (same as before)
+        # Keep if any action runs a non-Microsoft binary, or a script host
+        [bool]($Exes | Where-Object {
+                !(Test-MicrosoftSigned $_) -or
+                [IO.Path]::GetFileNameWithoutExtension($_) -in $ScriptHosts
+            })
     } | Where-Object {
-        $TaskPath = $_.Actions.Execute -replace '"', '' -replace ' .*$', ''
-        if ($TaskPath -and (Test-Path $TaskPath -ErrorAction SilentlyContinue)) {
-            $VersionInfo = (Get-Item $TaskPath -ErrorAction SilentlyContinue).VersionInfo
-            $VersionInfo.CompanyName -notmatch 'Microsoft' -and
-            $VersionInfo.ProductName -notmatch 'Microsoft' -and
-            $VersionInfo.FileDescription -notmatch 'Microsoft'
-        }
-        else {
-            $true
-        }
+        $TaskText = "$($_.TaskPath)$($_.TaskName) $(@($_.Actions.Execute) -join ' ')"
+        !($Exclusions | Where-Object { $TaskText -like "*$_*" })
     }
-
+    
     $MatchedTaskPaths = ($MatchedTasks | ForEach-Object {
-            "Task Path: $($_.Actions.Execute -replace '"', '' -replace ' .*$', '')"
+            $_.Actions | Where-Object { $_.Execute } | ForEach-Object { "Task Path: $(Get-ExecutablePath $_.Execute)" }
         }) -join "`n"
 
     $ConfidenceScore = 0
