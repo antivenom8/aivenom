@@ -1,3 +1,64 @@
+<#
+.SYNOPSIS
+This script is used to detect installed or active Remote Access Tools (RMM/RATs) on an endpoint.
+
+.DESCRIPTION
+Script pulls the LOLRMM tool database from lolrmm.io and keeps a local cached copy for fallback. 
+It parses each tool's known executables, domains, file names, and install paths then scans the device 
+across multiple vectors: running processes, services, DNS client cache, 
+installed software (registry uninstall keys under HKLM and every user hive, including unloaded profiles)
+and scheduled tasks. Microsoft-signed items are filtered out. Each detected tool is assigned a confidence
+score based on how many vectors matched, and results are written to custom fields as both a plain-text 
+summary and a color-coded WYSIWYG HTML table.
+
+# ---------------------------------------------------------------
+# Author: Mark Giordano
+# Date: June 29th, 2026
+# Description: Detects Remote Access / RMM tools and reports findings to custom fields.
+# ---------------------------------------------------------------
+
+.NOTES
+### Requried Custom Fields ###
+Name: RemoteAccessTools
+Type: WYSIWYG
+
+Name: DetectedRATs
+Type: Text
+
+### Optional Custom Fields ###
+Name: RATExclusions
+Type: Text
+Comma-separated list of app/registry names to exclude from findings. Read at runtime and combined with the DefaultRATExclusions script variable.
+
+### Required Script Variables ###
+ITToolsPath
+Type: Text
+Directory path used to store the local rmm_tools.json fallback cache. Referenced as $env:ITToolsPath.
+
+### Optional Script Variables ###
+DefaultRATExclusions
+Type: Text
+Comma-separated list of default exclusions applied on every run. Referenced as $env:DefaultRATExclusions.
+
+Confidence scoring: 
+Matched Process +3
+Registry (installed software) +3
+Process description matches app name +2
+Install path present on disk +2
+DNS cache hit +2
+Scheduled task +2
+Service +1.
+
+HTML row coloring is driven by the confidence score:
+8 or higher = danger
+5-7 = warning
+3-4 = other
+below 3 = unknown
+
+Pulls the latest tool database. If the remote pull fails, it falls back to the locally cached json.
+If neither source is available, the script exits 1. If no tools are found, the RemoteAccessTools and
+DetectedRATs custom fields are cleared. Exits 0 on completion.
+#>
 
 function ConvertTo-HtmlSafe {
     param ([string]$Value)
