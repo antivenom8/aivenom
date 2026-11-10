@@ -325,7 +325,8 @@ Get-CimInstance Win32_Service -ErrorAction SilentlyContinue | ForEach-Object { $
 
 $Findings = foreach ($Group in $GroupedData) {
     $AppName = $Group.Name
-    $MatchedReg = $InstalledSoftware | Where-Object { $_.DisplayName -match [regex]::Escape($AppName) }
+    $AppNamePattern = "(?<![A-Za-z0-9])$([regex]::Escape($AppName))"
+    $MatchedReg = $InstalledSoftware | Where-Object { $_.DisplayName -match $AppNamePattern }
     $MatchedReg = $MatchedReg | Where-Object {
         # Check name, publisher and install location so e.g. "steamapps" can exclude a game without killing the RAT detection
         $Reg = $_
@@ -360,7 +361,7 @@ $Findings = foreach ($Group in $GroupedData) {
     }
 
     $MatchedService = $Services | Where-Object {
-        $_.Name -like "*$AppName*" -or $_.DisplayName -like "*$AppName*"
+        $_.Name -match $AppNamePattern -or $_.DisplayName -match $AppNamePattern
     } | ForEach-Object {
         $Service = $_
         $BinaryToCheck = Get-ExecutablePath $ServicePathMap[$Service.Name]
@@ -398,8 +399,8 @@ $Findings = foreach ($Group in $GroupedData) {
 
     $MatchedTasks = $ScheduledTasks | Where-Object {
         $Task = $_
-        $Task.TaskName -like "*$AppName*" -or
-        ($Task.Actions | Where-Object { $_.Execute -match [regex]::Escape($AppName) })
+        $Task.TaskName -match $AppNamePattern -or
+        ($Task.Actions | Where-Object { $_.Execute -match $AppNamePattern })
     } | Where-Object {
         $Exes = @($_.Actions | Where-Object { $_.Execute } | ForEach-Object { Get-ExecutablePath $_.Execute })
         if (!$Exes) { return $true }   # COM-handler-only task: can't verify, keep (same as before)
@@ -419,7 +420,7 @@ $Findings = foreach ($Group in $GroupedData) {
 
     $ConfidenceScore = 0
     if ($MatchedProcess) { $ConfidenceScore += 3 }
-    if ($MatchedProcess -and ($MatchedProcess | Where-Object { $_.Description -match [regex]::Escape($AppName) })) { 
+    if ($MatchedProcess -and ($MatchedProcess | Where-Object { $_.Description -match $AppNamePattern })) { 
         $ConfidenceScore += 2 
     }
     if ($MatchedReg) { $ConfidenceScore += 3 }
